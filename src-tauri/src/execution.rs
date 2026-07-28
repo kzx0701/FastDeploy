@@ -343,6 +343,61 @@ struct CommandOutput {
     stdout: String,
 }
 
+/// 构造扩展后的 PATH，覆盖常见 node/pnpm 安装路径。
+///
+/// macOS GUI 应用从 Finder/Spotlight 启动时，进程 PATH 仅含 /usr/bin:/bin 等系统路径，
+/// 不包含 nvm/fnm/homebrew/volta 安装的 node/pnpm。
+/// 登录 shell（-l）只读 ~/.zprofile，而 nvm/fnm 的 PATH 通常写在 ~/.zshrc 中，导致找不到命令。
+/// 此函数主动收集常见安装路径，不依赖 shell 配置文件加载顺序。
+#[cfg(not(target_os = "windows"))]
+fn build_extended_unix_path() -> String {
+    let home = env::var("HOME").unwrap_or_default();
+    let current_path = env::var("PATH").unwrap_or_default();
+
+    let mut paths: Vec<String> = vec![current_path];
+
+    // Homebrew（Apple Silicon & Intel）
+    paths.push("/opt/homebrew/bin".to_string());
+    paths.push("/opt/homebrew/sbin".to_string());
+    paths.push("/usr/local/bin".to_string());
+    paths.push("/usr/local/sbin".to_string());
+
+    if !home.is_empty() {
+        // Volta
+        paths.push(format!("{home}/.volta/bin"));
+        // pnpm 全局安装
+        paths.push(format!("{home}/.local/share/pnpm"));
+        // fnm
+        paths.push(format!("{home}/.fnm/aliases/default/bin"));
+        paths.push(format!("{home}/.local/share/fnm/aliases/default/bin"));
+        // Cargo（rust 工具链）
+        paths.push(format!("{home}/.cargo/bin"));
+
+        // nvm：扫描已安装版本，最新的优先
+        let nvm_versions_dir = format!("{home}/.nvm/versions/node");
+        if let Ok(entries) = std::fs::read_dir(&nvm_versions_dir) {
+            let mut versions: Vec<String> = entries
+                .filter_map(|e| e.ok())
+                .filter_map(|e| {
+                    let bin = e.path().join("bin");
+                    bin.to_str().map(|s| s.to_string())
+                })
+                .collect();
+            // 按版本号倒序（v20 > v18），最新的在前
+            versions.sort();
+            versions.reverse();
+            paths.extend(versions);
+        }
+
+        // asdf
+        paths.push(format!("{home}/.asdf/shims"));
+        // mise (原 rtx)
+        paths.push(format!("{home}/.local/share/mise/shims"));
+    }
+
+    paths.join(":")
+}
+
 /// 执行 shell 命令，支持轮询中止标志
 /// 当 aborted_flag 被设为 true 时，立即 kill 整个进程组并返回 status=130 的 CommandOutput
 fn run_shell_command(
@@ -366,6 +421,11 @@ fn run_shell_command(
         let mut shell_command = Command::new(shell);
         // 使用 -lc（登录 shell + 命令），不使用 -i（交互式）避免 prompt/termios 副作用
         shell_command.args(["-lc", command]);
+
+        // macOS GUI 应用启动时 PATH 仅含 /usr/bin:/bin 等系统路径，
+        // nvm/fnm/homebrew/volta 安装的 pnpm/node 找不到。
+        // 主动扩展 PATH 覆盖常见安装位置，不依赖 ~/.zshrc 加载。
+        shell_command.env("PATH", build_extended_unix_path());
 
         // 创建新会话（新进程组），使后续 killpg 能杀掉整个进程树（shell → pnpm → node）
         unsafe {

@@ -55,7 +55,8 @@ export async function upsertProject(scanResult: ProjectScanResult) {
 
     const updated: ProjectRecord = {
       ...existing,
-      name: scanResult.name,
+      // 保留用户自定义的项目名，不覆盖为扫描得到的目录名
+      name: existing.name,
       packageJsonPath: scanResult.packageJsonPath,
       projectType: scanResult.projectType,
       packageManager: scanResult.packageManager,
