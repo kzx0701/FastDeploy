@@ -1,6 +1,6 @@
 [package]
 name = "FastDeploy"
-version = "1.6.0"
+version = "1.6.1"
 description = "Desktop workbench for front-end build and deployment with OpenClaw"
 authors = ["Codex"]
 license = ""
