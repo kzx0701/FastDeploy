@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "XClaw",
+  "productName": "FastDeploy",
   "version": "1.5.0",
   "identifier": "com.xindieshu.clawdeploy",
   "build": {
@@ -13,7 +13,7 @@
     "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "XClaw",
+        "title": "FastDeploy",
         "label": "main",
         "width": 1440,
         "height": 960,
@@ -23,7 +23,7 @@
         "center": true
       },
       {
-        "title": "XClaw",
+        "title": "FastDeploy",
         "label": "tray-popup",
         "url": "#/tray-popup",
         "width": 320,

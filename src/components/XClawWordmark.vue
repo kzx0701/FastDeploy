@@ -1,7 +1,7 @@
 <template>
-  <button type="button" class="xclaw-wordmark" :style="wordmarkStyle" :aria-label="text" @click="$emit('click')">
-    <span class="xclaw-wordmark-copy">
-      <span class="xclaw-wordmark-x">X</span><span>Claw</span>
+  <button type="button" class="fastdeploy-wordmark" :style="wordmarkStyle" :aria-label="text" @click="$emit('click')">
+    <span class="fastdeploy-wordmark-copy">
+      <span class="fastdeploy-wordmark-accent">Fast</span><span>Deploy</span>
     </span>
   </button>
 </template>
@@ -18,7 +18,7 @@ const props = withDefaults(
   {
     accentColor: "#0057c2",
     fontSize: "1.5rem",
-    text: "XClaw",
+    text: "FastDeploy",
   },
 );
 
@@ -33,7 +33,7 @@ const wordmarkStyle = computed(() => ({
 </script>
 
 <style scoped>
-.xclaw-wordmark {
+.fastdeploy-wordmark {
   margin: 0;
   display: inline-flex;
   align-items: baseline;
@@ -51,20 +51,20 @@ const wordmarkStyle = computed(() => ({
   transition: opacity 140ms ease;
 }
 
-.xclaw-wordmark:hover {
+.fastdeploy-wordmark:hover {
   opacity: 0.82;
 }
 
-.dark .xclaw-wordmark {
+.dark .fastdeploy-wordmark {
   color: var(--text-primary);
 }
 
-.xclaw-wordmark:focus-visible {
+.fastdeploy-wordmark:focus-visible {
   outline: 1px solid var(--border);
   outline-offset: 4px;
 }
 
-.xclaw-wordmark-copy {
+.fastdeploy-wordmark-copy {
   display: inline-flex;
   align-items: baseline;
   min-width: 0;
@@ -76,12 +76,12 @@ const wordmarkStyle = computed(() => ({
   white-space: nowrap;
 }
 
-.dark .xclaw-wordmark-copy {
+.dark .fastdeploy-wordmark-copy {
   color: var(--text-primary);
 }
 
-.xclaw-wordmark-x {
+.fastdeploy-wordmark-accent {
   color: var(--animation-color);
-  letter-spacing: -0.08em;
+  letter-spacing: -0.04em;
 }
 </style>

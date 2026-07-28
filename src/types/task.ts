@@ -14,7 +14,15 @@ export type AuthType = 'password' | 'privateKey'
 export type UploadStrategy = 'overwrite' | 'clear-and-upload'
 export type ExecutionMode = 'build' | 'deploy' | 'build-and-deploy'
 export type ExecutionStatus = 'idle' | 'running' | 'success' | 'error'
-export type TaskHistoryStatus = 'success' | 'error'
+export type TaskHistoryStatus = 'success' | 'error' | 'canceled'
+
+export interface MonorepoPackage {
+  name: string
+  relativePath: string
+  projectType: ProjectType
+  buildCommand: string
+  outputDir: string
+}
 
 export interface ProjectRecord {
   id: string
@@ -31,6 +39,10 @@ export interface ProjectRecord {
   defaultPrecheckEnabled: boolean
   defaultPrecheckCommand: string
   defaultDeployServerIdByEnv?: Record<string, string>
+  isMonorepo?: boolean
+  monorepoPackages?: MonorepoPackage[]
+  /** monorepo 子包相对路径（如 "apps/admin"），为空表示在根目录打包 */
+  packagePath?: string
   createdAt: string
   updatedAt: string
   lastUsedAt?: string
@@ -47,6 +59,8 @@ export interface ProjectScanResult {
   detectedOutputDir: string
   defaultBuildCommand: string
   defaultOutputDir: string
+  isMonorepo: boolean
+  monorepoPackages: MonorepoPackage[]
 }
 
 export interface ProjectAiContextFile {
@@ -156,6 +170,8 @@ export interface LocalBuildRequest {
   precheckCommand: string
   runPrecheck: boolean
   buildTimeout: number
+  taskId?: string
+  packagePath?: string
 }
 
 export interface LocalBuildResult {
@@ -172,6 +188,7 @@ export interface LocalBuildResult {
   precheckSuccess: boolean
   buildOutput: string
   success: boolean
+  aborted?: boolean
 }
 
 export interface DeployExecutionContext {

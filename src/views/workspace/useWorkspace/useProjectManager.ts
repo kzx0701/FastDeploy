@@ -221,17 +221,22 @@ export function useProjectManager(options: UseProjectManagerOptions) {
     })
   }
 
-  async function handleSaveProjectConfig() {
-    if (!projectDraft.value) {
-      return
+  async function handleSaveProjectConfig(projectOverride?: ProjectRecord, options?: { silent?: boolean }): Promise<ProjectRecord[]> {
+    const projectToSave = projectOverride ?? projectDraft.value
+    if (!projectToSave) {
+      return projects.value
     }
 
-    projects.value = await updateProjectConfig(projectDraft.value)
-    latestScannedProject.value = projects.value.find((project) => project.id === projectDraft.value?.id) ?? null
+    projects.value = await updateProjectConfig(projectToSave)
+    latestScannedProject.value = projects.value.find((project) => project.id === projectToSave.id) ?? null
     projectDraft.value = latestScannedProject.value ? { ...latestScannedProject.value } : null
 
-    appStore.setBannerMessage(`已保存项目配置：${projectDraft.value?.name ?? ""}`)
-    showToast("项目配置已保存", "success")
+    if (!options?.silent) {
+      appStore.setBannerMessage(`已保存项目配置：${projectDraft.value?.name ?? ""}`)
+      showToast("项目配置已保存", "success")
+    }
+
+    return projects.value
   }
 
   return {

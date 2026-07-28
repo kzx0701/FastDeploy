@@ -86,7 +86,7 @@ defineProps<{
 
 const appStore = useAppStore();
 const appVersion = ref("1.0.0");
-const releaseUrl = "https://github.com/kzx0701/XClaw/releases";
+const releaseUrl = "https://github.com/kzx0701/FastDeploy/releases";
 const isMacOS = navigator.platform.toUpperCase().includes("MAC");
 
 const navItems = [
@@ -112,7 +112,7 @@ async function openReleasePage() {
 
 function handleNavClick(panel: string) {
   if (panel === 'config' && appStore.activePanel === 'config') {
-    window.dispatchEvent(new CustomEvent('xclaw:navigate-project-list'))
+    window.dispatchEvent(new CustomEvent('fastdeploy:navigate-project-list'))
   }
   appStore.setActivePanel(panel as any)
 }

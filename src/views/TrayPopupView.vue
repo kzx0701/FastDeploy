@@ -396,7 +396,8 @@ async function handleDeploy(item: TrayDeployOption) {
   startElapsedTimer()
 
   const startedAt = new Date().toISOString()
-  let buildOutputPath = `${item.project.localPath}/${item.project.defaultOutputDir}`
+  const packagePathSegment = item.project.packagePath ? `${item.project.packagePath}/` : ''
+  let buildOutputPath = `${item.project.localPath}/${packagePathSegment}${item.project.defaultOutputDir}`
   let historySummary = ""
   let historyErrorMessage = ""
   let deployStatus: "success" | "error" = "error"
@@ -412,6 +413,7 @@ async function handleDeploy(item: TrayDeployOption) {
         precheckCommand: item.project.defaultPrecheckCommand,
         runPrecheck: item.project.defaultPrecheckEnabled,
         buildTimeout: loadTimeout(BUILD_TIMEOUT_KEY, 600),
+        packagePath: item.project.packagePath || '',
       })
 
       if (!buildResult.success) {

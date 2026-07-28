@@ -211,17 +211,25 @@
         </div>
       </div>
 
-      <div v-else-if="hasActiveFilter" class="deployment-log-empty">
-        <Search class="h-5 w-5" aria-hidden="true" />
-        <p>没有匹配的记录</p>
-        <small>尝试调整筛选条件或重置筛选。</small>
-      </div>
+      <Empty v-else-if="hasActiveFilter" class="deployment-log-empty border-0">
+        <EmptyMedia>
+          <Search class="deployment-log-empty-icon" :size="40" />
+        </EmptyMedia>
+        <EmptyContent>
+          <EmptyTitle class="deployment-log-empty-title">没有匹配的记录</EmptyTitle>
+          <EmptyDescription class="deployment-log-empty-desc">尝试调整筛选条件或重置筛选。</EmptyDescription>
+        </EmptyContent>
+      </Empty>
 
-      <div v-else class="deployment-log-empty">
-        <FileClock class="h-5 w-5" aria-hidden="true" />
-        <p>暂无部署日志</p>
-        <small>完成部署任务后，所有项目的部署记录会集中显示在这里。</small>
-      </div>
+      <Empty v-else class="deployment-log-empty border-0">
+        <EmptyMedia>
+          <FileClock class="deployment-log-empty-icon" :size="40" />
+        </EmptyMedia>
+        <EmptyContent>
+          <EmptyTitle class="deployment-log-empty-title">暂无部署日志</EmptyTitle>
+          <EmptyDescription class="deployment-log-empty-desc">完成部署任务后，所有项目的部署记录会集中显示在这里。</EmptyDescription>
+        </EmptyContent>
+      </Empty>
     </article>
   </section>
 </template>
@@ -233,17 +241,19 @@ import { FileClock, Filter, Search, Trash2 } from "lucide-vue-next"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import WorkspaceToolbarPanel from "@/components/workspace-header/WorkspaceToolbarPanel.vue"
+import { Empty, EmptyContent, EmptyDescription, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Input as InputText } from "@/components/ui/input"
 import Popover from "@/components/ui/popover/Popover.vue"
 import PopoverContent from "@/components/ui/popover/PopoverContent.vue"
 import PopoverTrigger from "@/components/ui/popover/PopoverTrigger.vue"
-import type { ExecutionMode, ProjectRecord, TaskHistoryRecord, TaskHistoryStatus } from "@/types/task"
+import type { ExecutionMode, TaskHistoryRecord, TaskHistoryStatus } from "@/types/task"
+import type { ProjectSummary } from "@/types/project"
 import { formatEnvironmentLabel } from "./formatters"
 import type { DeployLogFilterState } from "./useDeployLogFilter"
 
 defineProps<{
   records: TaskHistoryRecord[]
-  projects: ProjectRecord[]
+  projects: ProjectSummary[]
   filter: DeployLogFilterState
   filteredRecords: TaskHistoryRecord[]
   hasActiveFilter: boolean
@@ -365,6 +375,35 @@ function formatMode(mode: ExecutionMode) {
   display: grid;
   min-width: 0;
   background: transparent;
+}
+
+/* === 空状态（与项目列表空状态保持一致） === */
+.deployment-log-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 360px;
+  padding: 40px;
+}
+
+.deployment-log-empty-icon {
+  color: var(--text-muted);
+}
+
+.deployment-log-empty-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.deployment-log-empty-desc {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  text-align: center;
 }
 
 .deployment-log-body {

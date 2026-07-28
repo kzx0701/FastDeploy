@@ -1,3 +1,4 @@
+use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -5,6 +6,16 @@ use std::path::{Path, PathBuf};
 pub struct ProjectDetection {
     pub project_type: String,
     pub package_manager: String,
+    pub build_command: String,
+    pub output_dir: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MonorepoPackage {
+    pub name: String,
+    pub relative_path: String,
+    pub project_type: String,
     pub build_command: String,
     pub output_dir: String,
 }
@@ -229,4 +240,288 @@ fn normalize_config_output_value(raw_value: &str) -> Option<String> {
     }
 
     Some(value)
+}
+
+// ==================== Monorepo 检测 ====================
+
+/// 检测项目是否为 monorepo，如果是则返回所有**可部署**的子包信息。
+/// 只返回有 index.html 或检测到前端框架的子包（过滤掉 internal/packages 下的库包）。
+/// 识别信号：pnpm-workspace.yaml、package.json 的 workspaces 字段。
+pub fn detect_monorepo_packages(project_path: &Path, package_json: &Value) -> Vec<MonorepoPackage> {
+    let workspace_globs = collect_workspace_globs(project_path, package_json);
+    if workspace_globs.is_empty() {
+        return Vec::new();
+    }
+
+    let package_manager = detect_package_manager(project_path);
+    let mut packages = Vec::new();
+
+    for glob in workspace_globs {
+        for package_dir in expand_workspace_glob(project_path, &glob) {
+            if let Some(pkg) = read_monorepo_package(project_path, &package_dir, &package_manager) {
+                // 只保留可部署的前端应用（有 index.html 或检测到前端框架）
+                if !is_deployable_package(&package_dir, &pkg.project_type) {
+                    continue;
+                }
+                // 去重：同一个 relative_path 只保留一次
+            if !packages.iter().any(|p: &MonorepoPackage| p.relative_path == pkg.relative_path) {
+                packages.push(pkg);
+            }
+            }
+        }
+    }
+
+    // 按路径排序，保证展示稳定
+    packages.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
+    packages
+}
+
+/// 判断子包是否是可部署的前端应用
+fn is_deployable_package(package_dir: &Path, project_type: &str) -> bool {
+    // 有 index.html 的是前端应用
+    if package_dir.join("index.html").is_file() {
+        return true;
+    }
+    // 检测到前端框架的也是可部署应用
+    project_type != "unknown"
+}
+
+/// 从 pnpm-workspace.yaml 和 package.json workspaces 字段收集工作区 glob 模式
+fn collect_workspace_globs(project_path: &Path, package_json: &Value) -> Vec<String> {
+    let mut globs = Vec::new();
+
+    // 1. pnpm-workspace.yaml
+    let workspace_yaml = project_path.join("pnpm-workspace.yaml");
+    if workspace_yaml.exists() {
+        if let Ok(content) = std::fs::read_to_string(&workspace_yaml) {
+            globs.extend(parse_pnpm_workspace_yaml(&content));
+        }
+    }
+
+    // 2. package.json workspaces 字段
+    if let Some(workspaces) = package_json.get("workspaces") {
+        match workspaces {
+            Value::Array(arr) => {
+                for item in arr {
+                    if let Some(s) = item.as_str() {
+                        globs.push(s.to_string());
+                    }
+                }
+            }
+            Value::Object(obj) => {
+                if let Some(packages) = obj.get("packages").and_then(Value::as_array) {
+                    for item in packages {
+                        if let Some(s) = item.as_str() {
+                            globs.push(s.to_string());
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    globs
+}
+
+/// 简单解析 pnpm-workspace.yaml，提取 packages 列表中的 glob 模式
+fn parse_pnpm_workspace_yaml(content: &str) -> Vec<String> {
+    let mut globs = Vec::new();
+    let mut in_packages = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // 空行跳过
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        // 顶层 key（无缩进）
+        if !line.starts_with(' ') && !line.starts_with('\t') {
+            in_packages = trimmed == "packages:";
+            continue;
+        }
+
+        // 在 packages: 下方的列表项
+        if in_packages {
+            if let Some(stripped) = trimmed.strip_prefix("- ") {
+                let pattern = stripped.trim().trim_matches(|c| c == '\'' || c == '"');
+                if !pattern.is_empty() {
+                    globs.push(pattern.to_string());
+                }
+            }
+        }
+    }
+
+    globs
+}
+
+/// 展开 workspace glob（如 "apps/*"、"packages/*"）为实际目录列表
+fn expand_workspace_glob(project_path: &Path, glob: &str) -> Vec<PathBuf> {
+    let glob = glob.trim().trim_start_matches("./");
+
+    // 支持 path/to/glob 形式
+    let parts: Vec<&str> = glob.split('/').collect();
+
+    // 找到第一个包含通配符的部分
+    let wildcard_idx = parts.iter().position(|p| p.contains('*') || p.contains('?'));
+
+    match wildcard_idx {
+        None => {
+            // 无通配符，直接检查是否存在
+            let path = project_path.join(glob);
+            if path.is_dir() {
+                vec![path]
+            } else {
+                Vec::new()
+            }
+        }
+        Some(idx) => {
+            // 前缀部分（通配符之前）
+            let prefix: PathBuf = parts[..idx].iter().collect();
+            let base = project_path.join(&prefix);
+            let pattern = parts[idx];
+            let suffix: Vec<&str> = parts[idx + 1..].to_vec();
+
+            if !base.is_dir() {
+                return Vec::new();
+            }
+
+            let entries = match std::fs::read_dir(&base) {
+                Ok(e) => e.filter_map(Result::ok).collect::<Vec<_>>(),
+                Err(_) => return Vec::new(),
+            };
+
+            let mut results = Vec::new();
+            for entry in entries {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+                let name = match path.file_name().and_then(|n| n.to_str()) {
+                    Some(n) => n,
+                    None => continue,
+                };
+
+                // 简单通配符匹配：只支持 * (匹配除 / 外的任意字符)
+                if simple_glob_match(pattern, name) {
+                    // 如果还有后续路径部分，拼接上去
+                    if suffix.is_empty() {
+                        results.push(path);
+                    } else {
+                        let full = path.join(suffix.join("/"));
+                        if full.is_dir() {
+                            results.push(full);
+                        }
+                    }
+                }
+            }
+            results
+        }
+    }
+}
+
+/// 简单 glob 匹配：支持 * (匹配任意非 / 字符) 和 ? (匹配单个字符)
+fn simple_glob_match(pattern: &str, text: &str) -> bool {
+    let pbytes = pattern.as_bytes();
+    let tbytes = text.as_bytes();
+    glob_match_helper(pbytes, 0, tbytes, 0)
+}
+
+fn glob_match_helper(pattern: &[u8], pidx: usize, text: &[u8], tidx: usize) -> bool {
+    let mut pidx = pidx;
+    let mut tidx = tidx;
+
+    while pidx < pattern.len() {
+        match pattern[pidx] {
+            b'*' => {
+                // * 匹配 0 个或多个字符
+                if pidx + 1 >= pattern.len() {
+                    return true; // 末尾的 * 匹配剩余所有
+                }
+                // 尝试匹配后续 pattern
+                for i in tidx..=text.len() {
+                    if glob_match_helper(pattern, pidx + 1, text, i) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            b'?' => {
+                if tidx >= text.len() {
+                    return false;
+                }
+                pidx += 1;
+                tidx += 1;
+            }
+            c => {
+                if tidx >= text.len() || text[tidx] != c {
+                    return false;
+                }
+                pidx += 1;
+                tidx += 1;
+            }
+        }
+    }
+
+    tidx == text.len()
+}
+
+/// 读取 monorepo 子包信息
+fn read_monorepo_package(
+    project_root: &Path,
+    package_dir: &Path,
+    package_manager: &str,
+) -> Option<MonorepoPackage> {
+    let package_json_path = package_dir.join("package.json");
+    if !package_json_path.is_file() {
+        return None;
+    }
+
+    let content = std::fs::read_to_string(&package_json_path).ok()?;
+    let package_json: Value = serde_json::from_str(&content).ok()?;
+
+    let name = package_json
+        .get("name")
+        .and_then(Value::as_str)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            package_dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string()
+        });
+
+    let scripts = package_json
+        .get("scripts")
+        .and_then(Value::as_object)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                .collect::<HashMap<String, String>>()
+        })
+        .unwrap_or_default();
+
+    let dependencies = extract_dependency_names(&package_json);
+    let project_type = detect_project_type(package_dir, &dependencies, &scripts);
+    let build_command = detect_build_command(&scripts, package_manager);
+    let output_dir = detect_output_dir(package_dir, &project_type);
+
+    let relative_path = package_dir
+        .strip_prefix(project_root)
+        .ok()
+        .and_then(|p| p.to_str())
+        .map(|s| s.replace('\\', "/"))
+        .unwrap_or_default();
+
+    Some(MonorepoPackage {
+        name,
+        relative_path,
+        project_type,
+        build_command,
+        output_dir,
+    })
 }

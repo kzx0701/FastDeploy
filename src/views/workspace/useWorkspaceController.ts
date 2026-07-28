@@ -2,10 +2,11 @@ import { watch, onMounted, onBeforeUnmount, ref } from "vue";
 import { TriangleAlert } from "lucide-vue-next";
 
 import { getTaskHistory, deleteTaskHistoryRecord } from "@/services/task-history/repository";
+import { runServerConnectionCheck } from "@/services/execution/connection-check";
 import { showToast } from "@/services/ui/toast";
 import { useConfirm } from "@/services/ui/confirm";
 import { useAppStore } from "@/stores/app";
-import type { TaskHistoryRecord, TaskHistoryStatus } from "@/types/task";
+import type { ProjectRecord, TaskHistoryRecord, TaskHistoryStatus } from "@/types/task";
 import { useProjectManager } from "./useWorkspace/useProjectManager";
 import { useEnvironmentManager } from "./useWorkspace/useEnvironmentManager";
 import { useServerManager } from "./useWorkspace/useServerManager";
@@ -38,21 +39,9 @@ export function useWorkspaceController() {
     servers: sharedServers,
   });
 
-  const serverManager = useServerManager({
-    selectedProjectId,
-    environmentDraft: environmentManager.environmentDraft,
-    projectEnvironmentsMap: environmentManager.projectEnvironmentsMap,
-    projects: ref([]),
-    loadEnvironmentDraft: async () => {},
-    refreshProjectEnvironmentMap: async () => {},
-    pushServerLog: logs.pushLog,
-  });
-
-  // Keep the shared servers ref in sync with serverManager's servers
-  watch(() => serverManager.servers.value, (newVal) => {
-    sharedServers.value = newVal;
-  }, { immediate: true });
-
+  // projectManager 必须在 serverManager 之前创建，
+  // 这样 serverManager 能直接拿到正确的 projects ref 和 environment 方法，
+  // 避免"先传占位值再后续赋值"导致的闭包陷阱（内部解构的值不会更新）。
   const projectManager = useProjectManager({
     selectedProjectId,
     latestScannedProject,
@@ -66,13 +55,24 @@ export function useWorkspaceController() {
     projectEnvironments: environmentManager.projectEnvironments,
   });
 
-  serverManager.projects = projectManager.projects;
-  serverManager.loadEnvironmentDraft = async (projectId: string) => {
-    await environmentManager.loadEnvironmentDraft(projectId, projectManager.projects.value);
-  };
-  serverManager.refreshProjectEnvironmentMap = async () => {
-    await environmentManager.refreshProjectEnvironmentMapWithData(projectManager.projects.value.map((p: any) => p.id));
-  };
+  const serverManager = useServerManager({
+    selectedProjectId,
+    environmentDraft: environmentManager.environmentDraft,
+    projectEnvironmentsMap: environmentManager.projectEnvironmentsMap,
+    projects: projectManager.projects,
+    loadEnvironmentDraft: async (projectId: string) => {
+      await environmentManager.loadEnvironmentDraft(projectId, projectManager.projects.value);
+    },
+    refreshProjectEnvironmentMap: async () => {
+      await environmentManager.refreshProjectEnvironmentMapWithData(projectManager.projects.value.map((p: any) => p.id));
+    },
+    pushServerLog: logs.pushLog,
+  });
+
+  // Keep the shared servers ref in sync with serverManager's servers
+  watch(() => serverManager.servers.value, (newVal) => {
+    sharedServers.value = newVal;
+  }, { immediate: true });
 
   async function refreshTaskHistory(projectId?: string | null) {
     taskHistoryRecords.value = await getTaskHistory(projectId);
@@ -162,8 +162,37 @@ export function useWorkspaceController() {
     selectedProjectId.value = null
   }
 
+  /**
+   * 重新从 storage 同步项目列表与环境映射，用于卡片列表的手动刷新。
+   * 会保留当前选中项目（若仍存在），并刷新其环境数据。
+   */
+  async function handleRefreshProjectData() {
+    await projectManager.refreshProjects();
+    await environmentManager.refreshProjectEnvironmentMapWithData(
+      projectManager.projects.value.map((p: any) => p.id)
+    );
+    if (selectedProjectId.value) {
+      await environmentManager.loadEnvironmentDraft(
+        selectedProjectId.value,
+        projectManager.projects.value,
+      );
+    }
+    showToast("已同步最新项目数据", "success");
+  }
+
+  /**
+   * 重新从 storage 同步服务器列表与环境映射，用于服务器面板的手动刷新。
+   */
+  async function handleRefreshServerData() {
+    await serverManager.refreshServers();
+    await environmentManager.refreshProjectEnvironmentMapWithData(
+      projectManager.projects.value.map((p: any) => p.id)
+    );
+    showToast("已同步最新服务器数据", "success");
+  }
+
   onMounted(async () => {
-    window.addEventListener('xclaw:navigate-project-list', handleNavigateProjectList)
+    window.addEventListener('fastdeploy:navigate-project-list', handleNavigateProjectList)
     await projectManager.refreshProjects();
     await serverManager.refreshServers();
     await environmentManager.refreshProjectEnvironmentMapWithData(
@@ -178,7 +207,7 @@ export function useWorkspaceController() {
   });
 
   onBeforeUnmount(() => {
-    window.removeEventListener('xclaw:navigate-project-list', handleNavigateProjectList)
+    window.removeEventListener('fastdeploy:navigate-project-list', handleNavigateProjectList)
   });
 
   return {
@@ -223,12 +252,13 @@ export function useWorkspaceController() {
     copyLogs: logs.copyLogs,
     formatEnvironmentLabel: environmentManager.formatEnvironmentLabel,
     hasQuickDeployOptions: quickDeploy.hasQuickDeployOptions,
-    quickDeployOptionsByProject: quickDeploy.quickDeployOptionsByProject,
     handlePickDirectory: projectManager.handlePickDirectory,
     handleSelectProject,
     openProjectDeleteDialog: projectManager.openProjectDeleteDialog,
     handleBackToProjectList: projectManager.handleBackToProjectList,
     handleSaveProjectConfig: projectManager.handleSaveProjectConfig,
+    handleRefreshProjectData,
+    handleRefreshServerData,
     handleCheckEnvironment: async () => {
       if (!environmentManager.environmentDraft.value) {
         showToast("请先选择一个项目环境", "warning");
@@ -284,7 +314,10 @@ export function useWorkspaceController() {
     handleConfirmDeleteEnvironmentByName: environmentManager.handleConfirmDeleteEnvironmentByName,
     handleResetEnvironmentDraft: environmentManager.handleResetEnvironmentDraft,
     handleSaveEnvironment: () =>
-      environmentManager.handleSaveEnvironment(projectManager.projects.value, projectManager.handleSaveProjectConfig as any),
+      environmentManager.handleSaveEnvironment(
+        projectManager.projects.value,
+        (project: ProjectRecord) => projectManager.handleSaveProjectConfig(project, { silent: true }),
+      ),
     handleSelectEnvironment: environmentManager.handleSelectEnvironment,
     handleCheckServer: serverManager.handleCheckServer,
     handleCloseCreateServer: serverManager.handleCloseCreateServer,

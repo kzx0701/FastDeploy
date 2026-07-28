@@ -153,7 +153,7 @@
         <div class="settings-row">
           <div class="settings-row-info">
             <label class="settings-row-label">当前版本</label>
-            <span class="settings-row-desc">XClaw 桌面应用</span>
+            <span class="settings-row-desc">FastDeploy 桌面应用</span>
           </div>
           <div class="settings-row-control">
             <Badge variant="secondary" class="settings-badge">v{{ appVersion }}</Badge>
@@ -327,7 +327,7 @@ onMounted(async () => {
 async function handleExport() {
   try {
     const filePath = await save({
-      defaultPath: "xclaw-data.json",
+      defaultPath: "fastdeploy-data.json",
       filters: [{ name: "JSON", extensions: ["json"] }],
       title: "导出数据",
     })
@@ -463,9 +463,9 @@ async function handleCopyEmail() {
 
 async function handleOpenGitHub() {
   try {
-    await invoke("open_external_url", { url: "https://github.com/kzx0701/XClaw" });
+    await invoke("open_external_url", { url: "https://github.com/kzx0701/FastDeploy" });
   } catch {
-    window.open("https://github.com/kzx0701/XClaw", "_blank", "noopener,noreferrer");
+    window.open("https://github.com/kzx0701/FastDeploy", "_blank", "noopener,noreferrer");
   }
 }
 </script>

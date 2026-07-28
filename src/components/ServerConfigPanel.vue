@@ -25,6 +25,18 @@
       <section v-if="servers.length > 0" class="server-library-section">
         <header class="server-section-header">
           <h2>服务器</h2>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            class="section-refresh-button"
+            :class="{ 'is-refreshing': isRefreshing }"
+            :title="isRefreshing ? '正在同步...' : '同步最新数据'"
+            :aria-label="isRefreshing ? '正在同步' : '同步最新数据'"
+            :disabled="isRefreshing"
+            @click.stop="handleRefresh"
+          >
+            <RefreshCw class="h-4 w-4" :class="{ 'refresh-spinning': isRefreshing }" aria-hidden="true" />
+          </Button>
         </header>
 
         <div v-if="filteredServers.length > 0" class="server-card-list">
@@ -234,7 +246,7 @@
 </template>
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { Eye, EyeOff, KeyRound, Plus, Save, Search, Server, ShieldCheck, Trash2, Wifi } from "lucide-vue-next";
+import { Eye, EyeOff, KeyRound, Plus, RefreshCw, Save, Search, Server, ShieldCheck, Trash2, Wifi } from "lucide-vue-next";
 
 import serverBackground from "@/assets/images/server-bg.png";
 import ResourceCard from "@/components/ResourceCard.vue";
@@ -259,6 +271,7 @@ const emit = defineEmits<{
   "close-create": [];
   "create-server": [];
   "delete-server-card": [serverId: string];
+  "refresh": [];
   "save-server": [];
   "select-server": [serverId: string];
   "update:modelValue": [value: ServerFormValue];
@@ -273,6 +286,7 @@ const props = defineProps<{
 
 const showPassword = ref(false);
 const searchKeyword = ref("");
+const isRefreshing = ref(false);
 
 const editorMode = computed(() => (props.selectedServerId ? "edit" : "create"));
 const filteredServers = computed(() => {
@@ -313,6 +327,19 @@ function handleDrawerOpenChange(nextOpen: boolean) {
     emit("close-create");
   }
 }
+
+/** 点击标题行刷新按钮：同步最新服务器数据 */
+async function handleRefresh() {
+  if (isRefreshing.value) return;
+  isRefreshing.value = true;
+  try {
+    emit("refresh");
+  } finally {
+    setTimeout(() => {
+      isRefreshing.value = false;
+    }, 600);
+  }
+}
 </script>
 
 <style scoped>
@@ -350,6 +377,7 @@ function handleDrawerOpenChange(nextOpen: boolean) {
   display: flex;
   align-items: center;
   justify-content: flex-start;
+  gap: 6px;
 }
 
 .server-section-header h2 {
@@ -358,6 +386,29 @@ function handleDrawerOpenChange(nextOpen: boolean) {
   font-size: 16px;
   font-weight: 700;
   line-height: 1.5;
+}
+
+.section-refresh-button {
+  color: var(--text-muted);
+}
+
+.section-refresh-button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.section-refresh-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.refresh-spinning {
+  animation: refresh-spin 0.9s linear infinite;
+}
+
+@keyframes refresh-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .server-card-list {

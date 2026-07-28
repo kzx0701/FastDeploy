@@ -11,8 +11,8 @@ function generateId() {
 
 function sortProjects(projects: ProjectRecord[]) {
   return [...projects].sort((left, right) => {
-    const leftTime = left.lastUsedAt ?? left.updatedAt
-    const rightTime = right.lastUsedAt ?? right.updatedAt
+    const leftTime = left.createdAt ?? left.updatedAt
+    const rightTime = right.createdAt ?? right.updatedAt
 
     return new Date(rightTime).getTime() - new Date(leftTime).getTime()
   })
@@ -29,6 +29,30 @@ export async function upsertProject(scanResult: ProjectScanResult) {
   const existing = projects.find((project) => project.localPath === scanResult.localPath)
 
   if (existing) {
+    // monorepo 子包自动选择：如果只有一个可部署子包，自动设置 packagePath
+    const monorepoPackages = scanResult.monorepoPackages
+    const autoPackagePath =
+      scanResult.isMonorepo && monorepoPackages.length === 1
+        ? monorepoPackages[0].relativePath
+        : ''
+
+    // 如果已有 packagePath 且在新的子包列表中存在，保留用户选择
+    const preservedPackagePath =
+      existing.packagePath && monorepoPackages.some((p) => p.relativePath === existing.packagePath)
+        ? existing.packagePath
+        : autoPackagePath
+
+    // 如果自动选择了子包，同时填充该子包的打包命令和产物目录
+    let defaultBuildCommand = scanResult.defaultBuildCommand
+    let defaultOutputDir = scanResult.defaultOutputDir
+    if (preservedPackagePath) {
+      const pkg = monorepoPackages.find((p) => p.relativePath === preservedPackagePath)
+      if (pkg) {
+        if (pkg.buildCommand.trim()) defaultBuildCommand = pkg.buildCommand
+        if (pkg.outputDir.trim()) defaultOutputDir = pkg.outputDir
+      }
+    }
+
     const updated: ProjectRecord = {
       ...existing,
       name: scanResult.name,
@@ -38,8 +62,11 @@ export async function upsertProject(scanResult: ProjectScanResult) {
       scripts: scanResult.scripts,
       detectedBuildCommand: scanResult.detectedBuildCommand,
       detectedOutputDir: scanResult.detectedOutputDir,
-      defaultBuildCommand: scanResult.defaultBuildCommand,
-      defaultOutputDir: scanResult.defaultOutputDir,
+      defaultBuildCommand,
+      defaultOutputDir,
+      isMonorepo: scanResult.isMonorepo,
+      monorepoPackages,
+      packagePath: preservedPackagePath,
       updatedAt: now,
       lastUsedAt: now,
     }
@@ -47,6 +74,23 @@ export async function upsertProject(scanResult: ProjectScanResult) {
     const nextProjects = projects.map((project) => (project.id === existing.id ? updated : project))
     await saveProjects(sortProjects(nextProjects))
     return updated
+  }
+
+  // monorepo 子包自动选择：如果只有一个可部署子包，自动设置 packagePath
+  const monorepoPackages = scanResult.monorepoPackages
+  const autoPackagePath =
+    scanResult.isMonorepo && monorepoPackages.length === 1
+      ? monorepoPackages[0].relativePath
+      : ''
+
+  let defaultBuildCommand = scanResult.defaultBuildCommand
+  let defaultOutputDir = scanResult.defaultOutputDir
+  if (autoPackagePath) {
+    const pkg = monorepoPackages.find((p) => p.relativePath === autoPackagePath)
+    if (pkg) {
+      if (pkg.buildCommand.trim()) defaultBuildCommand = pkg.buildCommand
+      if (pkg.outputDir.trim()) defaultOutputDir = pkg.outputDir
+    }
   }
 
   const created: ProjectRecord = {
@@ -59,11 +103,14 @@ export async function upsertProject(scanResult: ProjectScanResult) {
     scripts: scanResult.scripts,
     detectedBuildCommand: scanResult.detectedBuildCommand,
     detectedOutputDir: scanResult.detectedOutputDir,
-    defaultBuildCommand: scanResult.defaultBuildCommand,
-    defaultOutputDir: scanResult.defaultOutputDir,
+    defaultBuildCommand,
+    defaultOutputDir,
     defaultPrecheckEnabled: false,
     defaultPrecheckCommand: '',
     defaultDeployServerIdByEnv: {},
+    isMonorepo: scanResult.isMonorepo,
+    monorepoPackages,
+    packagePath: autoPackagePath,
     createdAt: now,
     updatedAt: now,
     lastUsedAt: now,

@@ -14,6 +14,7 @@
         @pick-directory="workspace.handlePickDirectory"
         @select-project="workspace.handleSelectProject"
         @start-quick-deploy="workspace.startQuickDeploy"
+        @refresh="workspace.handleRefreshProjectData"
       />
 
       <WorkspaceProjectDetailSection
@@ -54,6 +55,7 @@
           @close-create="workspace.handleCloseCreateServer"
           @create-server="workspace.handleCreateServer"
           @delete-server-card="workspace.handleConfirmDeleteServerById"
+          @refresh="workspace.handleRefreshServerData"
           @save-server="workspace.handleSaveServer"
           @select-server="workspace.handleSelectServer"
         />

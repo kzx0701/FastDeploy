@@ -1,3 +1,4 @@
+mod abort;
 mod build_artifact;
 mod deploy;
 mod execution;
@@ -23,6 +24,7 @@ pub fn run() {
             deploy::check_server_connection,
             deploy::run_local_deploy,
             execution::run_local_build,
+            execution::abort_build,
             external::open_external_url,
             external::write_json_file,
             external::read_json_file,
@@ -71,7 +73,7 @@ pub fn run() {
                 use tauri::tray::{TrayIconBuilder, MouseButton, MouseButtonState, TrayIconEvent};
                 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 
-                let show_item = MenuItemBuilder::with_id("show_main", "打开 XClaw").build(app)?;
+                let show_item = MenuItemBuilder::with_id("show_main", "打开 FastDeploy").build(app)?;
                 let quit_item = MenuItemBuilder::with_id("quit", "退出").build(app)?;
                 let menu = MenuBuilder::new(app)
                     .items(&[&show_item, &quit_item])
@@ -80,7 +82,7 @@ pub fn run() {
                 TrayIconBuilder::new()
                     .icon(tauri::include_image!("icons/tray-icon.png"))
                     .icon_as_template(true)
-                    .tooltip("XClaw")
+                    .tooltip("FastDeploy")
                     .menu(&menu)
                     .show_menu_on_left_click(false)
                     .on_menu_event(|app, event| {

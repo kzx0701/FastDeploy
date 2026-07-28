@@ -29,6 +29,18 @@
       <section v-if="projects.length > 0" class="project-library-section">
         <header class="project-section-header">
           <h2>项目</h2>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            class="section-refresh-button"
+            :class="{ 'is-refreshing': isRefreshing }"
+            :title="isRefreshing ? '正在同步...' : '同步最新数据'"
+            :aria-label="isRefreshing ? '正在同步' : '同步最新数据'"
+            :disabled="isRefreshing"
+            @click.stop="handleRefresh"
+          >
+            <RefreshCw class="h-4 w-4" :class="{ 'refresh-spinning': isRefreshing }" aria-hidden="true" />
+          </Button>
         </header>
 
         <div v-if="filteredProjects.length > 0" class="project-card-list">
@@ -51,10 +63,12 @@
                     :key="option.environment.name"
                     class="deploy-env-tag"
                     :class="[getDeployTagTheme(option.environment.name), getDeployButtonClass(project.id, option.environment.name)]"
-                    :disabled="isDeployingOther(project.id, option.environment.name)"
-                    @click.stop="$emit('start-quick-deploy', option)"
+                    :disabled="isDeployingOther(project.id, option.environment.name) || isAborting(project.id, option.environment.name)"
+                    :title="isDeploying(project.id, option.environment.name) ? '点击中止部署' : `部署到${formatEnvironmentLabel(option.environment.name)}`"
+                    @click.stop="handleDeployTagClick(project.id, option)"
                   >
-                    <Loader2 v-if="isDeploying(project.id, option.environment.name)" class="h-3 w-3 deploy-spinning" />
+                    <Loader2 v-if="isAborting(project.id, option.environment.name)" class="h-3 w-3 deploy-spinning" />
+                    <Ban v-else-if="isDeploying(project.id, option.environment.name)" class="h-3 w-3 deploy-abort-icon" />
                     <Send v-else class="h-3 w-3" />
                     <span>{{ formatEnvironmentLabel(option.environment.name) }}</span>
                   </button>
@@ -105,7 +119,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from "vue"
-import { FolderOpen, Loader2, Plus, Search, Send, Trash2 } from "lucide-vue-next"
+import { Ban, FolderOpen, Loader2, Plus, RefreshCw, Search, Send, Trash2 } from "lucide-vue-next"
 
 import Alert from "@/components/ui/alert/Alert.vue"
 import Button from "@/components/ui/button/Button.vue"
@@ -114,21 +128,24 @@ import { Input as InputText } from "@/components/ui/input"
 import ResourceCard from "@/components/ResourceCard.vue"
 import WorkspaceToolbarPanel from "@/components/workspace-header/WorkspaceToolbarPanel.vue"
 import projectFolderIcon from "@/assets/images/folder.png"
+import { useDeploymentProgress } from "@/services/ui/deployment-progress"
+import { showToast } from "@/services/ui/toast"
 import { resolveAlertToneClass, resolveAlertVariant } from "@/lib/ui-status"
 
 import { formatEnvironmentLabel } from "./formatters"
 import type { QuickDeployEnvironmentOption } from "./types"
 import type { WorkspaceProjectListItem } from "./types"
 
-defineEmits<{
+const emit = defineEmits<{
   "delete-project": [projectId: string]
   "pick-directory": []
+  "refresh": []
   "select-project": [projectId: string]
   "start-quick-deploy": [option: QuickDeployEnvironmentOption]
 }>()
 
 const props = defineProps<{
-  deployStage: "confirm" | "running" | "success" | "error"
+  deployStage: "confirm" | "running" | "success" | "error" | "canceled"
   deployingEnvironmentName: string | null
   deployingProjectId: string | null
   importError: string
@@ -136,6 +153,10 @@ const props = defineProps<{
   projects: WorkspaceProjectListItem[]
   quickDeployOptions: Map<string, QuickDeployEnvironmentOption[]>
 }>()
+
+const deploymentProgress = useDeploymentProgress()
+const abortingTaskId = ref<string | null>(null)
+const isRefreshing = ref(false)
 
 const searchKeyword = ref("")
 const filteredProjects = computed(() => {
@@ -163,16 +184,82 @@ function isDeployingOther(projectId: string, environmentName: string): boolean {
   return !(props.deployingProjectId === projectId && props.deployingEnvironmentName === environmentName)
 }
 
+/** 当前项目+环境是否处于中止中（本地 loading 态） */
+function isAborting(projectId: string, environmentName: string): boolean {
+  if (!abortingTaskId.value) return false
+  const task = deploymentProgress.tasks.find((t) => t.id === abortingTaskId.value)
+  return !!task && task.projectId === projectId && task.environmentName === environmentName
+}
+
+/** 从全局任务列表中查找运行中的 taskId */
+function findRunningTaskId(projectId: string, environmentName: string): string | null {
+  const task = deploymentProgress.tasks.find(
+    (t) => t.projectId === projectId && t.environmentName === environmentName && t.stage === "running",
+  )
+  return task?.id ?? null
+}
+
+/** 部署按钮点击：运行中则中止，否则发起部署 */
+function handleDeployTagClick(projectId: string, option: QuickDeployEnvironmentOption) {
+  if (isDeploying(projectId, option.environment.name)) {
+    handleAbortDeploy(projectId, option.environment.name)
+    return
+  }
+  // 中止中不允许发起新部署
+  if (isAborting(projectId, option.environment.name)) return
+  // 其他项目的部署进行中也不允许
+  if (isDeployingOther(projectId, option.environment.name)) return
+  emit("start-quick-deploy", option)
+}
+
+/** 中止当前项目+环境的部署任务 */
+async function handleAbortDeploy(projectId: string, environmentName: string) {
+  const taskId = findRunningTaskId(projectId, environmentName)
+  if (!taskId) {
+    showToast("任务可能已结束，无法中止", "warning")
+    return
+  }
+  if (abortingTaskId.value) return
+  abortingTaskId.value = taskId
+  try {
+    const success = await deploymentProgress.cancelTask(taskId)
+    if (!success) {
+      showToast("任务可能已结束，无法中止", "warning")
+    }
+  } finally {
+    setTimeout(() => {
+      if (abortingTaskId.value === taskId) {
+        abortingTaskId.value = null
+      }
+    }, 1500)
+  }
+}
+
 function getDeployButtonClass(projectId: string, environmentName: string): string {
   if (props.deployingProjectId !== projectId || props.deployingEnvironmentName !== environmentName) return ""
   if (props.deployStage === "success") return "deploy-tag-success"
   if (props.deployStage === "error") return "deploy-tag-error"
+  if (props.deployStage === "canceled") return "deploy-tag-canceled"
   return ""
 }
 
 function getDeployTagTheme(environmentName: string): string {
   if (environmentName === "prod") return "deploy-tag-prod"
   return "deploy-tag-test"
+}
+
+/** 点击标题行刷新按钮：同步最新项目与环境数据 */
+async function handleRefresh() {
+  if (isRefreshing.value) return
+  isRefreshing.value = true
+  try {
+    emit("refresh")
+  } finally {
+    // 给一个最小展示时长，避免图标闪过；实际刷新由父级异步完成
+    setTimeout(() => {
+      isRefreshing.value = false
+    }, 600)
+  }
 }
 </script>
 
@@ -211,6 +298,7 @@ function getDeployTagTheme(environmentName: string): string {
   display: flex;
   align-items: center;
   justify-content: flex-start;
+  gap: 6px;
 }
 
 .project-section-header h2 {
@@ -220,6 +308,29 @@ function getDeployTagTheme(environmentName: string): string {
   font-weight: 700;
   line-height: 1.5;
   letter-spacing: 0;
+}
+
+.section-refresh-button {
+  color: var(--text-muted);
+}
+
+.section-refresh-button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.section-refresh-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.refresh-spinning {
+  animation: refresh-spin 0.9s linear infinite;
+}
+
+@keyframes refresh-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .project-card-list {
@@ -306,6 +417,18 @@ function getDeployTagTheme(environmentName: string): string {
   border-color: var(--danger-soft) !important;
   color: var(--danger-soft) !important;
   background: var(--danger-tint) !important;
+}
+
+/* 部署已中止 */
+.deploy-tag-canceled {
+  border-color: var(--text-muted) !important;
+  color: var(--text-muted) !important;
+  background: var(--surface-active) !important;
+}
+
+/* 运行中按钮的 Ban 中止图标（红色） */
+.deploy-abort-icon {
+  color: var(--destructive);
 }
 
 /* 旋转动画 */

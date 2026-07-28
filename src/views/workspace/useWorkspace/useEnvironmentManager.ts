@@ -219,30 +219,42 @@ export function useEnvironmentManager(options: UseEnvironmentManagerOptions) {
       return
     }
 
-    await upsertEnvironment(selectedProjectId.value, environmentDraft.value)
-    await refreshProjectEnvironments(selectedProjectId.value)
-    selectedEnvironmentName.value = environmentDraft.value.name
-    const currentProject = projects.find((project) => project.id === selectedProjectId.value) ?? null
+    try {
+      await upsertEnvironment(selectedProjectId.value, environmentDraft.value)
+      await refreshProjectEnvironments(selectedProjectId.value)
+      selectedEnvironmentName.value = environmentDraft.value.name
+      const currentProject = projects.find((project) => project.id === selectedProjectId.value) ?? null
 
-    if (currentProject) {
-      const nextProject: ProjectRecord = {
-        ...currentProject,
-        defaultDeployServerIdByEnv: {
-          ...(currentProject.defaultDeployServerIdByEnv ?? {}),
-          [environmentDraft.value.name]: environmentDraft.value.serverId,
-        },
+      if (currentProject) {
+        const nextProject: ProjectRecord = {
+          ...currentProject,
+          defaultDeployServerIdByEnv: {
+            ...(currentProject.defaultDeployServerIdByEnv ?? {}),
+            [environmentDraft.value.name]: environmentDraft.value.serverId,
+          },
+        }
+
+        const updatedProjects = await updateProjectConfig(nextProject)
+        if (Array.isArray(updatedProjects) && updatedProjects.length > 0) {
+          latestScannedProject.value = updatedProjects.find((project) => project.id === selectedProjectId.value) ?? nextProject
+        } else {
+          latestScannedProject.value = nextProject
+        }
       }
 
-      const updatedProjects = await updateProjectConfig(nextProject)
-      projects = updatedProjects
-      latestScannedProject.value = updatedProjects.find((project) => project.id === selectedProjectId.value) ?? nextProject
+      const environmentLabel = formatEnvironmentLabel(environmentDraft.value.name)
+      appStore.setBannerMessage(`已保存 ${environmentLabel} 配置`)
+      showToast(`${environmentLabel} 配置已保存`, "success")
+      isEnvironmentEditorVisible.value = false
+      // 注意：此处不再调用 refreshProjectEnvironmentMap()。
+      // 上面的 refreshProjectEnvironments(selectedProjectId.value) 已增量更新
+      // projectEnvironmentsMap 中当前项目的条目，并保留了其他项目的数据。
+      // 无参调用 refreshProjectEnvironmentMap() 会因 getEnvironmentsByProjectIds([])
+      // 返回空 Map 而清空整个环境映射，导致返回卡片列表后环境标签全部消失。
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "环境配置保存失败"
+      showToast(message, "error")
     }
-
-    const environmentLabel = formatEnvironmentLabel(environmentDraft.value.name)
-    appStore.setBannerMessage(`已保存 ${environmentLabel} 配置`)
-    showToast(`${environmentLabel} 配置已保存`, "success")
-    isEnvironmentEditorVisible.value = false
-    await refreshProjectEnvironmentMap()
   }
 
   async function handleDeleteEnvironment() {
@@ -260,7 +272,7 @@ export function useEnvironmentManager(options: UseEnvironmentManagerOptions) {
 
     appStore.setBannerMessage(`已删除环境：${environmentName}`)
     showToast("环境已删除", "success")
-    await refreshProjectEnvironmentMap()
+    // 同上：refreshProjectEnvironments 已增量更新 map，不再无参调用清空整个映射
   }
 
   function handleConfirmDeleteEnvironment() {

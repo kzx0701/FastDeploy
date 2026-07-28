@@ -8,7 +8,7 @@
     "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "XClaw",
+        "title": "FastDeploy",
         "label": "main",
         "width": 1440,
         "height": 960,
@@ -19,7 +19,7 @@
         "hiddenTitle": true
       },
       {
-        "title": "XClaw",
+        "title": "FastDeploy",
         "label": "tray-popup",
         "url": "#/tray-popup",
         "width": 320,

@@ -28,6 +28,7 @@
                 <div class="deploy-task-icon-wrap" :data-stage="task.stage">
                   <Loader2 v-if="task.stage === 'running'" class="h-4 w-4 deploy-spinning" />
                   <Check v-else-if="task.stage === 'success'" class="h-4 w-4" />
+                  <Ban v-else-if="task.stage === 'canceled'" class="h-4 w-4" />
                   <X v-else class="h-4 w-4" />
                 </div>
                 <div class="deploy-task-info">
@@ -35,7 +36,17 @@
                   <p class="deploy-task-target">{{ task.environmentLabel }} · {{ task.serverName }}</p>
                 </div>
                 <button
-                  v-if="task.stage !== 'running'"
+                  v-if="task.stage === 'running'"
+                  class="deploy-task-abort-btn"
+                  title="中止部署"
+                  :disabled="abortingTaskId === task.id"
+                  @click="handleAbortTask(task.id)"
+                >
+                  <Loader2 v-if="abortingTaskId === task.id" class="h-3 w-3 deploy-spinning" />
+                  <Ban v-else class="h-3 w-3" />
+                </button>
+                <button
+                  v-else
                   class="deploy-task-dismiss-btn"
                   title="移除"
                   @click="dismissTask(task.id)"
@@ -52,9 +63,10 @@
                     :style="{ width: task.progress + '%' }"
                   ></div>
                 </div>
+                <p class="deploy-task-stage-text">{{ task.message || getStageMessage(task.stage) }}</p>
               </div>
 
-              <p v-if="task.stage !== 'success'" class="deploy-task-message">{{ task.message || getStageMessage(task.stage) }}</p>
+              <p v-if="task.stage === 'error'" class="deploy-task-message">{{ task.message || getStageMessage(task.stage) }}</p>
             </article>
           </template>
 
@@ -67,11 +79,12 @@
               v-for="record in historyRecords"
               :key="record.id"
               class="deploy-task-card"
-              :data-stage="record.status === 'success' ? 'success' : 'error'"
+              :data-stage="historyStage(record.status)"
             >
               <div class="deploy-task-header">
-                <div class="deploy-task-icon-wrap" :data-stage="record.status === 'success' ? 'success' : 'error'">
+                <div class="deploy-task-icon-wrap" :data-stage="historyStage(record.status)">
                   <Check v-if="record.status === 'success'" class="h-4 w-4" />
+                  <Ban v-else-if="record.status === 'canceled'" class="h-4 w-4" />
                   <X v-else class="h-4 w-4" />
                 </div>
                 <div class="deploy-task-info">
@@ -83,7 +96,7 @@
                 </div>
                 <span class="deploy-task-time">{{ formatTimeAgo(record.finishedAt) }}</span>
               </div>
-              <p v-if="record.status !== 'success'" class="deploy-task-message">{{ record.summary }}</p>
+              <p v-if="record.status === 'error'" class="deploy-task-message">{{ record.summary }}</p>
             </article>
           </template>
 
@@ -112,17 +125,19 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue"
-import { Check, Loader2, Rocket, X } from "lucide-vue-next"
+import { Ban, Check, Loader2, Rocket, X } from "lucide-vue-next"
 
 import { getTaskHistory } from "@/services/task-history/repository"
-import { useDeploymentProgress } from "@/services/ui/deployment-progress"
-import type { TaskHistoryRecord } from "@/types/task"
+import { useDeploymentProgress, type DeploymentTaskStage } from "@/services/ui/deployment-progress"
+import { showToast } from "@/services/ui/toast"
+import type { TaskHistoryRecord, TaskHistoryStatus } from "@/types/task"
 
-const { tasks, runningCount, hasRunning, dismissTask } = useDeploymentProgress()
+const { tasks, runningCount, hasRunning, dismissTask, cancelTask } = useDeploymentProgress()
 
 const isExpanded = ref(false)
 const historyRecords = ref<TaskHistoryRecord[]>([])
 const widgetRef = ref<HTMLElement | null>(null)
+const abortingTaskId = ref<string | null>(null)
 
 const visibleTasks = computed(() => tasks.filter((t) => !t.dismissed))
 
@@ -176,7 +191,34 @@ function getStageMessage(stage: string) {
   if (stage === "running") return "部署中..."
   if (stage === "success") return "部署成功"
   if (stage === "error") return "部署失败"
+  if (stage === "canceled") return "部署已中止"
   return ""
+}
+
+/** 将历史记录状态映射为任务卡片 stage，用于样式与图标展示 */
+function historyStage(status: TaskHistoryStatus): DeploymentTaskStage {
+  if (status === "success") return "success"
+  if (status === "canceled") return "canceled"
+  return "error"
+}
+
+/** 中止运行中的部署任务（仅打包阶段有效） */
+async function handleAbortTask(taskId: string) {
+  if (abortingTaskId.value) return
+  abortingTaskId.value = taskId
+  try {
+    const success = await cancelTask(taskId)
+    if (!success) {
+      showToast("任务可能已结束，无法中止", "warning")
+    }
+  } finally {
+    // 短暂保留 loading 态，待 executeDeploy 更新 task.stage 后清除
+    setTimeout(() => {
+      if (abortingTaskId.value === taskId) {
+        abortingTaskId.value = null
+      }
+    }, 1500)
+  }
 }
 
 function formatEnvironmentLabel(name: string) {
@@ -250,7 +292,7 @@ function formatTimeAgo(dateStr: string) {
   height: 18px;
   padding: 0 5px;
   border-radius: 9px;
-  background: var(--danger);
+  background: var(--destructive);
   color: var(--background);
   font-size: 11px;
   font-weight: 600;
@@ -379,6 +421,11 @@ function formatTimeAgo(dateStr: string) {
   background: var(--danger-tint);
 }
 
+.deploy-task-card[data-stage="canceled"] {
+  border-color: transparent;
+  background: var(--surface-active);
+}
+
 .deploy-task-header {
   display: flex;
   align-items: center;
@@ -405,6 +452,10 @@ function formatTimeAgo(dateStr: string) {
 
 .deploy-task-icon-wrap[data-stage="error"] {
   color: color-mix(in srgb, var(--danger-soft) 55%, transparent);
+}
+
+.deploy-task-icon-wrap[data-stage="canceled"] {
+  color: var(--text-muted);
 }
 
 .deploy-task-info {
@@ -466,6 +517,32 @@ function formatTimeAgo(dateStr: string) {
   color: var(--text-primary);
 }
 
+/* === 中止按钮（运行中任务显示，默认红色） === */
+.deploy-task-abort-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--destructive);
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+
+.deploy-task-abort-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--destructive) 14%, transparent);
+  color: var(--destructive);
+}
+
+.deploy-task-abort-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 /* === 进度条 === */
 .deploy-task-progress {
   margin-top: 8px;
@@ -510,6 +587,22 @@ function formatTimeAgo(dateStr: string) {
 .deploy-task-card[data-stage="error"] .deploy-task-message {
   color: color-mix(in srgb, var(--danger-soft) 55%, transparent);
   font-weight: 500;
+}
+
+.deploy-task-card[data-stage="canceled"] .deploy-task-message {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+/* 运行中进度条下方的阶段文字（如"正在本地打包..."） */
+.deploy-task-stage-text {
+  margin: 6px 0 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* === 空状态 === */

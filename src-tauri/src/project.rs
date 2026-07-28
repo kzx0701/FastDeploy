@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::project_detection::detect_project;
+use crate::project_detection::{detect_project, detect_monorepo_packages, MonorepoPackage};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -18,6 +18,8 @@ pub struct ProjectScanResult {
     detected_output_dir: String,
     default_build_command: String,
     default_output_dir: String,
+    is_monorepo: bool,
+    monorepo_packages: Vec<MonorepoPackage>,
 }
 
 #[derive(Serialize)]
@@ -58,11 +60,10 @@ pub fn scan_project(project_path: String) -> Result<ProjectScanResult, String> {
     let package_json: Value =
         serde_json::from_str(&content).map_err(|error| format!("解析 package.json 失败: {error}"))?;
 
-    let name = package_json
-        .get("name")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown-project")
-        .to_string();
+    let name = project_path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown-project".to_string());
 
     let scripts = package_json
         .get("scripts")
@@ -76,6 +77,8 @@ pub fn scan_project(project_path: String) -> Result<ProjectScanResult, String> {
         .unwrap_or_default();
 
     let detection = detect_project(project_path, &package_json, &scripts);
+    let monorepo_packages = detect_monorepo_packages(project_path, &package_json);
+    let is_monorepo = !monorepo_packages.is_empty();
 
     Ok(ProjectScanResult {
         name,
@@ -88,6 +91,8 @@ pub fn scan_project(project_path: String) -> Result<ProjectScanResult, String> {
         detected_output_dir: detection.output_dir.clone(),
         default_build_command: detection.build_command,
         default_output_dir: detection.output_dir,
+        is_monorepo,
+        monorepo_packages,
     })
 }
 

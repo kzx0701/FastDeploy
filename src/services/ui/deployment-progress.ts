@@ -1,6 +1,8 @@
 import { reactive, computed } from "vue"
 
-export type DeploymentTaskStage = "running" | "success" | "error"
+import { abortBuild } from "@/services/execution/abort"
+
+export type DeploymentTaskStage = "running" | "success" | "error" | "canceled"
 
 export interface DeploymentTask {
   id: string
@@ -64,6 +66,30 @@ function clearFinished() {
   }
 }
 
+/**
+ * 中止运行中的部署任务（仅支持打包阶段）
+ * 调用后端 abort_build 命令设置中止标志，实际的 stage 更新由 executeDeploy catch 块完成
+ * 返回 true 表示成功设置中止标志
+ */
+async function cancelTask(id: string): Promise<boolean> {
+  const task = tasks.find((t) => t.id === id)
+  if (!task || task.stage !== "running") {
+    return false
+  }
+
+  try {
+    const success = await abortBuild(id)
+    if (!success) {
+      // 任务可能已结束，由 executeDeploy 正常处理
+      return false
+    }
+    return true
+  } catch (error) {
+    console.error("[deployment-progress] 中止部署任务失败:", error)
+    return false
+  }
+}
+
 export function useDeploymentProgress() {
   return {
     tasks,
@@ -75,5 +101,6 @@ export function useDeploymentProgress() {
     dismissTask,
     removeTask,
     clearFinished,
+    cancelTask,
   }
 }
